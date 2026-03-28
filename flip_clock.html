@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <!-- Tell the browser which characters are used in this file -->
+  <meta charset="UTF-8" />
+
+  <!-- Make the widget size itself correctly on phones and embeds -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Browser tab title -->
+  <title>Notion Flip Clock Widget + Calendar</title>
+
+  <style>
+    /* =========================
+       COLOR VARIABLES
+       These are the main colors used in the widget.
+    ========================== */
+    :root {
+      --bg: transparent;                    /* Outer page background stays transparent */
+      --panel: #fcbfa7;                    /* Flip card background */
+      --text: #002c23;                     /* Main digit color */
+      --meta: #002c23;                     /* Date and weekday color */
+      --shadow: rgba(0, 0, 0, 0.24);      /* Card shadow */
+      --gap: clamp(6px, 2.2vw, 10px);     /* Space between the two cards */
+      --pad: clamp(6px, 2.5vw, 16px);     /* Outer padding around the widget */
+      --radius: clamp(12px, 4vw, 18px);   /* Rounded corner size */
+      --meta-h: clamp(22px, 8%, 30px);    /* Height reserved for date / weekday text */
+      --digit-size: clamp(86px, 33vw, 128px); /* Main digit size */
+      --pair-gap: 0em;                    /* Gap between the two digits inside one card */
+      --digit-shift: 0.375em;             /* Vertical shift used to align top and bottom halves */
+
+      --calendar-bg: #002c23;             /* Calendar background */
+      --calendar-header: #fcbfa7;         /* Calendar header background */
+      --calendar-text: #fff1eb;           /* Calendar text color */
+      --calendar-muted: rgba(255, 241, 235, 0.5); /* Faded dates from previous / next month */
+      --calendar-active: #fcbfa7;         /* Circle behind the current day */
+      --calendar-shadow: 0 18px 44px rgba(0, 0, 0, 0.18); /* Calendar shadow */
+    }
+
+    /* Make width and height calculations more predictable */
+    * {
+      box-sizing: border-box;
+    }
+
+    /* Make the html and body fill the whole embed area */
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    /* Main wrapper that centers everything */
+    .widget {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--pad);
+    }
+
+    /* Clock container that holds the two flip cards */
+    .clock {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--gap);
+      width: 100%;
+      height: 100%;
+      max-width: 360px;
+      max-height: 260px;
+      transition: opacity 0.18s ease, visibility 0.18s ease;
+    }
+
+    /* Hide the clock when the calendar is open */
+    .clock.calendar-open {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    /* One single flip card */
+    .card {
+      position: relative;
+      flex: 1 1 0;
+      width: min(42vw, 160px);
+      max-width: 160px;
+      min-width: 0;
+      aspect-ratio: 2 / 3;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--panel);
+      box-shadow: 0 14px 30px var(--shadow);
+    }
+
+    /* Area that contains the flipping digits, leaving room below for labels */
+    .digit-wrap {
+      position: absolute;
+      inset: 0 0 var(--meta-h) 0;
+    }
+
+    /* Static top half, static bottom half, animated top half and animated bottom half */
+    .half,
+    .flip-top,
+    .flip-bottom {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 50%;
+      overflow: hidden;
+      background: var(--panel);
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+    }
+
+    /* Place the top pieces in the upper half */
+    .half.top,
+    .flip-top {
+      top: 0;
+      transform-origin: bottom center;
+    }
+
+    /* Place the bottom pieces in the lower half */
+    .half.bottom,
+    .flip-bottom {
+      bottom: 0;
+      transform-origin: top center;
+    }
+
+    /* Keep the static top above the static bottom */
+    .half.top {
+      z-index: 2;
+    }
+
+    /* Static bottom sits below static top */
+    .half.bottom {
+      z-index: 1;
+    }
+
+    /* Hide animated halves until a flip starts */
+    .flip-top,
+    .flip-bottom {
+      display: none;
+      z-index: 8;
+    }
+
+    /* Digit pair inside a card, for example 12 or 47 */
+    .digit {
+      position: absolute;
+      left: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: var(--pair-gap);
+      width: max-content;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      text-align: center;
+      font-family: "Arial Narrow", Arial, Helvetica, sans-serif;
+      font-size: var(--digit-size);
+      font-weight: 700;
+      line-height: 0.76;
+      letter-spacing: 0;
+      font-stretch: condensed;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: geometricPrecision;
+    }
+
+    /* One single digit character inside the pair */
+    .digit .char {
+      display: block;
+      min-width: 0.48em;
+      text-align: center;
+    }
+
+    /* Move the top digit down so its lower half sits exactly on the hinge */
+    .half.top .digit,
+    .flip-top .digit {
+      bottom: calc(var(--digit-shift) * -1);
+    }
+
+    /* Move the bottom digit up so its upper half sits exactly on the hinge */
+    .half.bottom .digit,
+    .flip-bottom .digit {
+      top: calc(var(--digit-shift) * -1);
+    }
+
+    /* Line in the middle of the card that looks like the flip hinge */
+    .hinge-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 2px;
+      background: var(--panel);
+      transform: translateY(-1px);
+      z-index: 12;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+      pointer-events: none;
+    }
+
+    /* Show the animated halves only while the card is flipping */
+    .card.flipping .flip-top,
+    .card.flipping .flip-bottom {
+      display: block;
+    }
+
+    /* Animate the old top half folding down */
+    .card.flipping .flip-top {
+      animation: flipTop 0.38s ease-in forwards;
+    }
+
+    /* Animate the new bottom half folding up */
+    .card.flipping .flip-bottom {
+      transform: rotateX(90deg);
+      animation: flipBottom 0.38s ease-out 0.38s forwards;
+    }
+
+    /* Top-half flip animation */
+    @keyframes flipTop {
+      from {
+        transform: rotateX(0deg);
+        filter: brightness(1);
+      }
+      to {
+        transform: rotateX(-90deg);
+        filter: brightness(0.82);
+      }
+    }
+
+    /* Bottom-half flip animation */
+    @keyframes flipBottom {
+      from {
+        transform: rotateX(90deg);
+        filter: brightness(0.82);
+      }
+      to {
+        transform: rotateX(0deg);
+        filter: brightness(1);
+      }
+    }
+
+    /* Bottom row inside each card for the date and weekday */
+    .meta {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 15;
+      height: var(--meta-h);
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      padding: 0 clamp(8px, 3vw, 12px) clamp(10px, 3.5vw, 14px);
+    }
+
+    /* Common text style for date and weekday */
+    .meta-label {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: clamp(10px, 2.6vw, 12px);
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0.06em;
+      color: var(--meta);
+      text-transform: uppercase;
+      opacity: 0.9;
+    }
+
+    /* Clickable date chip that opens the calendar */
+    .date-trigger {
+      cursor: pointer;
+      pointer-events: auto;
+      border: 0;
+      border-radius: 999px;
+      padding: 2px 6px;
+      background: var(--text);
+      color: #fff1eb;
+      font-weight: 700;
+      transition: background 0.16s ease, color 0.16s ease;
+      user-select: none;
+    }
+
+    /* Hover and keyboard focus style for the date chip */
+    .date-trigger:hover,
+    .date-trigger:focus-visible {
+      background: #fff1eb;
+      color: #002c23;
+      outline: none;
+    }
+
+    /* The popup calendar panel */
+    .calendar-popover {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      width: min(100%, 360px);
+      height: min(100%, 260px);
+      border-radius: 18px;
+      overflow: hidden;
+      background: var(--calendar-bg);
+      box-shadow: var(--calendar-shadow);
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -50%) scale(0.96);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    /* Visible state for the popup calendar */
+    .calendar-popover.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* Top bar of the calendar */
+    .calendar-header {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 20px;
+      background: var(--calendar-header);
+      color: #002c23;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    /* Month name in the calendar header */
+    .calendar-title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      height: 24px;
+      text-align: center;
+      font-size: 16px;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    /* Previous and next month arrow buttons */
+    .nav-btn {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 0;
+      width: 24px;
+      height: 24px;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: inherit;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    /* Hover and keyboard focus style for month arrows */
+    .nav-btn:hover,
+    .nav-btn:focus-visible {
+      background: rgba(255, 255, 255, 0.12);
+      outline: none;
+    }
+
+    /* Main inner area of the calendar */
+    .calendar-body {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 12px;
+      min-height: 0;
+      height: calc(100% - 52px);
+      padding: 16px 12px 18px;
+    }
+
+    /* Both the weekday header row and the day grid use the same column structure */
+    .weekday-row,
+    .days-grid {
+      display: grid;
+      grid-template-columns: 28px repeat(7, 1fr);
+      column-gap: 8px;
+    }
+
+    /* Grid that holds all day cells */
+    .days-grid {
+      flex: 1 1 auto;
+      min-height: 0;
+      grid-auto-rows: minmax(0, 1fr);
+      align-content: stretch;
+      row-gap: 4px;
+    }
+
+    /* Row that holds weekday abbreviations */
+    .weekday-row {
+      flex: 0 0 auto;
+      align-items: center;
+      margin-bottom: 0;
+    }
+
+    /* Weekday labels like MA, TI, KE */
+    .weekday-head {
+      text-align: center;
+      padding: 2px 0;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      color: #fff1eb;
+    }
+
+    /* One calendar day cell */
+    .day-cell {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 78%;
+      height: 78%;
+      min-width: 0;
+      min-height: 0;
+      margin: auto;
+      aspect-ratio: 1 / 1;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff1eb;
+      user-select: none;
+    }
+
+    /* More faded look for days from previous or next month */
+    .day-cell.muted {
+      color: var(--calendar-muted);
+      font-weight: 500;
+    }
+
+    /* Highlight style for the current day */
+    .day-cell.today {
+      background: var(--calendar-active);
+      color: #002c23;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+    }
+
+    /* Invisible layer behind the calendar that lets the user click outside to close it */
+    .calendar-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      background: transparent;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+    }
+
+    /* Enable outside-click closing when the calendar is open */
+    .calendar-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Week number header and week number cells */
+    .week-number-head,
+    .week-number-cell {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      height: 100%;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      color: rgba(255, 241, 235, 0.6);
+    }
+
+    /* Slightly stronger visibility for the week number heading */
+    .week-number-head {
+      opacity: 0.9;
+    }
+
+    /* Smaller layout adjustments for taller / narrower embeds */
+    @media (max-aspect-ratio: 4/5) {
+      :root {
+        --gap: clamp(4px, 1.8vw, 8px);
+        --pad: clamp(4px, 2vw, 10px);
+        --digit-size: clamp(72px, 31vw, 110px);
+      }
+
+      .card {
+        max-width: none;
+      }
+
+      .calendar-popover {
+        width: 100%;
+        height: min(100%, 260px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Main widget wrapper -->
+  <div class="widget">
+    <!-- Clock with two flip cards: hours on the left, minutes on the right -->
+    <div class="clock" id="clock" aria-label="Paikallinen flip-kello">
+      <!-- Hour card -->
+      <div class="card" id="hourCard">
+        <!-- Digit area -->
+        <div class="digit-wrap">
+          <!-- Static top half -->
+          <div class="half top"><div class="digit" id="hourTopStatic">00</div></div>
+
+          <!-- Static bottom half -->
+          <div class="half bottom"><div class="digit" id="hourBottomStatic">00</div></div>
+
+          <!-- Animated top half shown only while flipping -->
+          <div class="flip-top"><div class="digit" id="hourFlipTop">00</div></div>
+
+          <!-- Animated bottom half shown only while flipping -->
+          <div class="flip-bottom"><div class="digit" id="hourFlipBottom">00</div></div>
+
+          <!-- Middle hinge line -->
+          <div class="hinge-line"></div>
+        </div>
+
+        <!-- Bottom label area -->
+        <div class="meta">
+          <!-- Clickable date that opens the calendar -->
+          <button class="meta-label date-trigger" id="dateTrigger" type="button" aria-haspopup="dialog" aria-expanded="false">28.03.</button>
+
+          <!-- Empty spacer on the right -->
+          <div></div>
+        </div>
+      </div>
+
+      <!-- Minute card -->
+      <div class="card" id="minuteCard">
+        <!-- Digit area -->
+        <div class="digit-wrap">
+          <!-- Static top half -->
+          <div class="half top"><div class="digit" id="minuteTopStatic">00</div></div>
+
+          <!-- Static bottom half -->
+          <div class="half bottom"><div class="digit" id="minuteBottomStatic">00</div></div>
+
+          <!-- Animated top half shown only while flipping -->
+          <div class="flip-top"><div class="digit" id="minuteFlipTop">00</div></div>
+
+          <!-- Animated bottom half shown only while flipping -->
+          <div class="flip-bottom"><div class="digit" id="minuteFlipBottom">00</div></div>
+
+          <!-- Middle hinge line -->
+          <div class="hinge-line"></div>
+        </div>
+
+        <!-- Bottom label area -->
+        <div class="meta">
+          <!-- Empty spacer on the left -->
+          <div></div>
+
+          <!-- Weekday label -->
+          <div class="meta-label" id="weekdayLabel">MAANANTAI</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Invisible click layer used to close the calendar by clicking outside it -->
+    <div class="calendar-backdrop" id="calendarBackdrop"></div>
+
+    <!-- Calendar popup -->
+    <div class="calendar-popover" id="calendarPopover" role="dialog" aria-modal="false" aria-label="Kalenteri">
+      <!-- Calendar header -->
+      <div class="calendar-header">
+        <!-- Previous month button -->
+        <button class="nav-btn" id="prevMonthBtn" type="button" aria-label="Edellinen kuukausi">‹</button>
+
+        <!-- Month title. Clicking it closes the calendar -->
+        <div class="calendar-title" id="calendarTitle" role="button" tabindex="0" aria-label="Sulje kalenteri">maaliskuu 2026</div>
+
+        <!-- Next month button -->
+        <button class="nav-btn" id="nextMonthBtn" type="button" aria-label="Seuraava kuukausi">›</button>
+      </div>
+
+      <!-- Calendar grid area -->
+      <div class="calendar-body">
+        <!-- Weekday header row -->
+        <div class="weekday-row" id="weekdayRow"></div>
+
+        <!-- Days grid -->
+        <div class="days-grid" id="daysGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Full weekday names in Finnish for the label under the minute card.
+    const weekdays = [
+      "sunnuntai",
+      "maanantai",
+      "tiistai",
+      "keskiviikko",
+      "torstai",
+      "perjantai",
+      "lauantai"
+    ];
+
+    // Short weekday labels in Finnish for the calendar header row.
+    const calendarWeekdays = ["ma", "ti", "ke", "to", "pe", "la", "su"];
+
+    // Month names in Finnish for the calendar title.
+    const months = [
+      "tammikuu",
+      "helmikuu",
+      "maaliskuu",
+      "huhtikuu",
+      "toukokuu",
+      "kesäkuu",
+      "heinäkuu",
+      "elokuu",
+      "syyskuu",
+      "lokakuu",
+      "marraskuu",
+      "joulukuu"
+    ];
+
+    // Add a leading zero to one-digit numbers, for example 7 becomes 07.
+    const pad = (n) => String(n).padStart(2, "0");
+
+    // Save references to the main DOM elements so they are easy to reuse.
+    const clockEl = document.getElementById("clock");
+    const dateTrigger = document.getElementById("dateTrigger");
+    const calendarPopover = document.getElementById("calendarPopover");
+    const calendarBackdrop = document.getElementById("calendarBackdrop");
+    const calendarTitle = document.getElementById("calendarTitle");
+    const weekdayRow = document.getElementById("weekdayRow");
+    const daysGrid = document.getElementById("daysGrid");
+    const prevMonthBtn = document.getElementById("prevMonthBtn");
+    const nextMonthBtn = document.getElementById("nextMonthBtn");
+
+    // This stores which month the calendar is currently showing.
+    let calendarDate = new Date();
+
+    // These store the currently shown hour and minute so we only animate when they change.
+    let currentHour = null;
+    let currentMinute = null;
+
+    // Turn a two-digit string like "14" into HTML with two separate span elements.
+    function formatDigits(value) {
+      return value
+        .split("")
+        .map((char) => `<span class="char">${char}</span>`)
+        .join("");
+    }
+
+    // Put the same digit pair into both the static top and static bottom halves.
+    function setStatic(prefix, value) {
+      const html = formatDigits(value);
+      document.getElementById(`${prefix}TopStatic`).innerHTML = html;
+      document.getElementById(`${prefix}BottomStatic`).innerHTML = html;
+    }
+
+    // Animate one card from an old value to a new value.
+    function animate(cardId, prefix, oldValue, newValue) {
+      // Do nothing if the value did not change.
+      if (oldValue === newValue) return;
+
+      // Find the card that should flip.
+      const card = document.getElementById(cardId);
+
+      // Put the old value into the animated top half.
+      document.getElementById(`${prefix}FlipTop`).innerHTML = formatDigits(oldValue);
+
+      // Put the new value into the animated bottom half.
+      document.getElementById(`${prefix}FlipBottom`).innerHTML = formatDigits(newValue);
+
+      // Restart the animation if it was already running.
+      card.classList.remove("flipping");
+      void card.offsetWidth;
+      card.classList.add("flipping");
+
+      // Halfway through the animation, replace the static value with the new one.
+      setTimeout(() => setStatic(prefix, newValue), 380);
+
+      // Remove the flipping class after the whole animation ends.
+      setTimeout(() => card.classList.remove("flipping"), 760);
+    }
+
+    // Check if two Date objects represent the same calendar day.
+    function isSameDate(a, b) {
+      return (
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate()
+      );
+    }
+
+    // Calculate ISO week number for a given date.
+    function getISOWeekNumber(date) {
+      const temp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const day = temp.getUTCDay() || 7;
+      temp.setUTCDate(temp.getUTCDate() + 4 - day);
+      const yearStart = new Date(Date.UTC(temp.getUTCFullYear(), 0, 1));
+      return Math.ceil((((temp - yearStart) / 86400000) + 1) / 7);
+    }
+
+    // Build the rows needed for the month view, including overflow days and week numbers.
+    function getCalendarRows(year, month) {
+      // First day of the current month.
+      const firstOfMonth = new Date(year, month, 1);
+
+      // Convert Sunday-first JS weekday into Monday-first calendar weekday.
+      const startWeekday = (firstOfMonth.getDay() + 6) % 7;
+
+      // Number of days in this month.
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      // Number of days in the previous month.
+      const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+      // This will hold every visible cell in the month grid.
+      const cells = [];
+
+      // Add trailing days from the previous month.
+      for (let i = startWeekday - 1; i >= 0; i--) {
+        cells.push({ day: daysInPrevMonth - i, offset: -1 });
+      }
+
+      // Add all days from the current month.
+      for (let day = 1; day <= daysInMonth; day++) {
+        cells.push({ day, offset: 0 });
+      }
+
+      // Add leading days from the next month until the grid ends on a full week.
+      while (cells.length % 7 !== 0) {
+        cells.push({ day: cells.length - (startWeekday + daysInMonth) + 1, offset: 1 });
+      }
+
+      // Split the cells into rows of 7 days and add ISO week numbers.
+      const rows = [];
+      for (let i = 0; i < cells.length; i += 7) {
+        const weekCells = cells.slice(i, i + 7);
+        const firstDate = new Date(year, month + weekCells[0].offset, weekCells[0].day);
+        rows.push({
+          weekNumber: getISOWeekNumber(firstDate),
+          cells: weekCells
+        });
+      }
+
+      return rows;
+    }
+
+    // Draw the current calendar month into the DOM.
+    function renderCalendar() {
+      const year = calendarDate.getFullYear();
+      const month = calendarDate.getMonth();
+      const today = new Date();
+
+      // Set the month name shown in the header.
+      calendarTitle.textContent = `${months[month]} ${year}`;
+
+      // Build the weekday heading row.
+      weekdayRow.innerHTML = [
+        '<div class="week-number-head">VK</div>',
+        ...calendarWeekdays.map((day) => `<div class="weekday-head">${day.toUpperCase()}</div>`)
+      ].join("");
+
+      // Build the calendar day cells.
+      const rows = getCalendarRows(year, month);
+      daysGrid.innerHTML = rows
+        .map((row) => {
+          const weekNumberHtml = `<div class="week-number-cell">${row.weekNumber}</div>`;
+          const daysHtml = row.cells
+            .map((cell) => {
+              const cellDate = new Date(year, month + cell.offset, cell.day);
+              const classes = ["day-cell"];
+
+              // Dim the dates that are outside the current month.
+              if (cell.offset !== 0) classes.push("muted");
+
+              // Highlight today.
+              if (isSameDate(cellDate, today)) classes.push("today");
+
+              return `<div class="${classes.join(" ")}">${cell.day}</div>`;
+            })
+            .join("");
+
+          return weekNumberHtml + daysHtml;
+        })
+        .join("");
+    }
+
+    // Open the calendar and reset it to the current month.
+    function openCalendar() {
+      const now = new Date();
+      calendarDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      renderCalendar();
+      calendarPopover.classList.add("open");
+      calendarBackdrop.classList.add("open");
+      clockEl.classList.add("calendar-open");
+      dateTrigger.setAttribute("aria-expanded", "true");
+    }
+
+    // Close the calendar.
+    function closeCalendar() {
+      calendarPopover.classList.remove("open");
+      calendarBackdrop.classList.remove("open");
+      clockEl.classList.remove("calendar-open");
+      dateTrigger.setAttribute("aria-expanded", "false");
+    }
+
+    // Open the calendar if it is closed, or close it if it is open.
+    function toggleCalendar() {
+      if (calendarPopover.classList.contains("open")) {
+        closeCalendar();
+      } else {
+        openCalendar();
+      }
+    }
+
+    // Update the clock display.
+    function update() {
+      const now = new Date();
+      const nextHour = pad(now.getHours());
+      const nextMinute = pad(now.getMinutes());
+
+      // On first load, set the hour immediately without animation.
+      if (currentHour === null) {
+        currentHour = nextHour;
+        setStatic("hour", nextHour);
+      } else if (currentHour !== nextHour) {
+        // Animate the hour only if it changed.
+        animate("hourCard", "hour", currentHour, nextHour);
+        currentHour = nextHour;
+      }
+
+      // On first load, set the minute immediately without animation.
+      if (currentMinute === null) {
+        currentMinute = nextMinute;
+        setStatic("minute", nextMinute);
+      } else if (currentMinute !== nextMinute) {
+        // Animate the minute only if it changed.
+        animate("minuteCard", "minute", currentMinute, nextMinute);
+        currentMinute = nextMinute;
+      }
+
+      // Update the weekday label on the right card.
+      document.getElementById("weekdayLabel").textContent = weekdays[now.getDay()].toUpperCase();
+
+      // Update the date button on the left card.
+      dateTrigger.textContent = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.`;
+    }
+
+    // Clicking the date opens or closes the calendar.
+    dateTrigger.addEventListener("click", toggleCalendar);
+
+    // Clicking outside the calendar closes it.
+    calendarBackdrop.addEventListener("click", closeCalendar);
+
+    // Clicking the month title closes the calendar.
+    calendarTitle.addEventListener("click", closeCalendar);
+
+    // Pressing Enter or Space on the month title also closes the calendar.
+    calendarTitle.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        closeCalendar();
+      }
+    });
+
+    // Go to the previous month.
+    prevMonthBtn.addEventListener("click", () => {
+      calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1);
+      renderCalendar();
+    });
+
+    // Go to the next month.
+    nextMonthBtn.addEventListener("click", () => {
+      calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1);
+      renderCalendar();
+    });
+
+    // Pressing Escape closes the calendar.
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeCalendar();
+    });
+
+    // Draw the current time right away.
+    update();
+
+    // Draw the calendar once so its layout is ready when opened.
+    renderCalendar();
+
+    // Wait until the next exact minute so the clock changes cleanly on minute boundaries.
+    const now = new Date();
+    const delay = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+
+    // Start minute-by-minute updates exactly on the next minute.
+    setTimeout(() => {
+      update();
+      setInterval(update, 60000);
+    }, delay);
+  </script>
+</body>
+</html>
