@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <!-- Tell the browser this is an HTML5 document. -->
+    <meta charset="UTF-8" />
+    <!-- Make the layout scale correctly on phones, tablets, and desktop screens. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Set the text shown in the browser tab. -->
+    <title>Notion Visual Timer</title>
+
+    <style>
+      /* Define reusable color variables for the whole widget. */
+      :root {
+        --face: #f8f8f6;
+        --wedge: #d94b4b;
+        --text: #1f2937;
+        --tick: #6b7280;
+        --button: #111827;
+        --button-soft: rgba(17, 24, 39, 0.08);
+        --panel-bg: rgba(255, 255, 255, 0.96);
+        --panel-border: rgba(17, 24, 39, 0.12);
+        --widget-bg: transparent;
+      }
+
+      /* Make width and height calculations include padding and borders. */
+      * {
+        box-sizing: border-box;
+      }
+
+      /* Center the widget on the page and keep the page background transparent. */
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        overflow: hidden;
+      }
+
+      /* Main outer wrapper for the whole timer widget. */
+      .card {
+        position: relative;
+        width: min(100vw, 420px);
+        background: var(--widget-bg);
+        padding: 12px 8px 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        border-radius: 20px;
+      }
+
+      /* Wrapper for the circular timer area. */
+      .timer-wrap {
+        position: relative;
+        z-index: 1;
+        width: min(100%, 420px);
+        aspect-ratio: 1 / 1;
+        user-select: none;
+        touch-action: none;
+      }
+
+      /* Make the SVG fill the available clock area. */
+      svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        cursor: grab;
+      }
+
+      /* Change the cursor while the user is dragging the timer. */
+      svg.dragging {
+        cursor: grabbing;
+      }
+
+      /* Style the large digital time display below the clock. */
+      .time {
+        font-size: clamp(32px, 9vw, 42px);
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: -0.04em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Row that holds the minus button, time text, and plus button. */
+      .controls {
+        width: min(100%, 420px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: clamp(12px, 4vw, 20px);
+      }
+
+      /* Shared base styles for the small round buttons. */
+      .adjust-button,
+      .mode-button,
+      .theme-toggle {
+        border: 0;
+        border-radius: 999px;
+        background: var(--button-soft);
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+      }
+
+      /* Style the minus and plus time buttons. */
+      .adjust-button {
+        width: clamp(42px, 12vw, 48px);
+        height: clamp(42px, 12vw, 48px);
+        font-size: clamp(24px, 6vw, 28px);
+        line-height: 1;
+        padding: 0;
+      }
+
+      /* Fade disabled adjust and play buttons so users can see they cannot be clicked. */
+      .adjust-button:disabled,
+      .play-button:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      /* Style the main play / pause button. */
+      .play-button {
+        width: clamp(48px, 14vw, 56px);
+        height: clamp(48px, 14vw, 56px);
+        border: 0;
+        border-radius: 999px;
+        background: var(--button);
+        color: white;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+      }
+
+      /* Place the play / pause button in the exact center of the clock. */
+      .play-button-center {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 4;
+      }
+
+      /* Make the icon inside the play button use the same cursor as the button itself. */
+      .play-button svg {
+        cursor: inherit;
+      }
+
+      /* Row that holds the 60, 30, and 10 minute mode buttons. */
+      .mode-row {
+        width: min(100%, 420px);
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      /* Style each timer mode button. */
+      .mode-button {
+        min-width: 74px;
+        height: 36px;
+        padding: 0 14px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      /* Highlight the currently selected mode button. */
+      .mode-button.active {
+        background: var(--button);
+        color: white;
+      }
+
+      /* Style the button that opens the color settings panel. */
+      .theme-toggle {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 7;
+        width: 34px;
+        height: 34px;
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      /* Style the color settings panel that opens from the top right. */
+      .theme-panel {
+        position: absolute;
+        top: 50px;
+        right: 10px;
+        z-index: 8;
+        width: min(260px, calc(100vw - 20px));
+        padding: 12px;
+        border-radius: 16px;
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+        display: none;
+        gap: 10px;
+      }
+
+      /* Show the color settings panel when it has the "open" class. */
+      .theme-panel.open {
+        display: grid;
+      }
+
+      /* Layout for each row inside the color settings panel. */
+      .theme-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      /* Style the color picker inputs inside the panel. */
+      .theme-row input[type="color"] {
+        width: 42px;
+        height: 32px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+
+      /* Use the same two-column layout for the checkbox row. */
+      .theme-row.checkbox-row {
+        grid-template-columns: 1fr auto;
+      }
+
+      /* Style the transparent background checkbox. */
+      .theme-row input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+      }
+
+      /* Style the "Reset colors" button. */
+      .theme-reset {
+        border: 0;
+        border-radius: 999px;
+        min-height: 36px;
+        padding: 0 14px;
+        background: var(--button);
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      /* Layer that holds the confetti animation above the clock. */
+      .confetti-layer {
+        position: absolute;
+        left: 50%;
+        top: 12px;
+        width: min(100%, 420px);
+        height: min(100%, 420px);
+        transform: translateX(-50%);
+        pointer-events: none;
+        overflow: hidden;
+        z-index: 2;
+      }
+
+      /* Style for each single confetti piece. */
+      .confetti-piece {
+        position: absolute;
+        top: -18%;
+        width: 5px;
+        height: 8px;
+        border-radius: 999px;
+        opacity: 0.95;
+        animation: confetti-fall linear forwards;
+        will-change: transform, opacity;
+      }
+
+      /* Animation that makes confetti fall and rotate. */
+      @keyframes confetti-fall {
+        0% {
+          transform: translate3d(0, 0, 0) rotate(0deg);
+          opacity: 0;
+        }
+        8% {
+          opacity: 0.95;
+        }
+        100% {
+          transform: translate3d(var(--drift-x), var(--fall-distance), 0) rotate(var(--rotate));
+          opacity: 0;
+        }
+      }
+
+      /* Make SVG text use the same font as the rest of the widget. */
+      text {
+        font-family: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Main widget container. -->
+    <div class="card" id="widgetCard">
+      <!-- Button that opens the color settings panel. -->
+      <button id="themeToggle" class="theme-toggle" aria-label="Open color settings" type="button">🎨</button>
+
+      <!-- Panel that lets the user change widget colors. -->
+      <div id="themePanel" class="theme-panel" aria-label="Color settings">
+        <!-- Row for choosing the clock face color. -->
+        <label class="theme-row">
+          <span>Clock face</span>
+          <input id="faceColorInput" type="color" value="#f8f8f6" />
+        </label>
+
+        <!-- Row for choosing the clock wedge color. -->
+        <label class="theme-row">
+          <span>Clock wedge</span>
+          <input id="wedgeColorInput" type="color" value="#d94b4b" />
+        </label>
+
+        <!-- Row for choosing the widget background color. -->
+        <label class="theme-row">
+          <span>Widget background</span>
+          <input id="bgColorInput" type="color" value="#ffffff" />
+        </label>
+
+        <!-- Row for turning the widget background transparent on or off. -->
+        <label class="theme-row checkbox-row">
+          <span>Transparent background</span>
+          <input id="transparentBgInput" type="checkbox" checked />
+        </label>
+
+        <!-- Button that restores the default colors. -->
+        <button id="themeResetButton" class="theme-reset" type="button">Reset colors</button>
+      </div>
+
+      <!-- Wrapper that holds the SVG clock and the center button. -->
+      <div class="timer-wrap">
+        <!-- SVG area where the timer circle, labels, and wedge are drawn. -->
+        <svg id="timerSvg" viewBox="0 0 320 320" aria-label="Visual timer" preserveAspectRatio="xMidYMid meet"></svg>
+        <!-- Center button used to start and pause the timer. -->
+        <button id="toggleButton" class="play-button play-button-center" aria-label="Start timer" type="button"></button>
+      </div>
+
+      <!-- Row that holds the minus button, time display, and plus button. -->
+      <div class="controls">
+        <!-- Button that subtracts time. -->
+        <button id="minusButton" class="adjust-button" aria-label="Subtract time" type="button">−</button>
+        <!-- Digital time readout. -->
+        <div id="timeDisplay" class="time">60:00</div>
+        <!-- Button that adds time. -->
+        <button id="plusButton" class="adjust-button" aria-label="Add time" type="button">+</button>
+      </div>
+
+      <!-- Buttons for switching between 60, 30, and 10 minute timer modes. -->
+      <div class="mode-row" aria-label="Timer length presets">
+        <button class="mode-button active" data-mode="60" type="button">60 min</button>
+        <button class="mode-button" data-mode="30" type="button">30 min</button>
+        <button class="mode-button" data-mode="10" type="button">10 min</button>
+      </div>
+
+      <!-- Empty layer where confetti is added when the timer ends. -->
+      <div id="confettiLayer" class="confetti-layer" aria-hidden="true"></div>
+    </div>
+
+    <script>
+      // SVG width and height used for drawing the clock.
+      const SIZE = 320;
+      // Center point of the SVG clock.
+      const CENTER = SIZE / 2;
+      // Radius of the timer circle.
+      const RADIUS = 112;
+      // Key used to save theme settings in the browser.
+      const THEME_STORAGE_KEY = "notion_visual_timer_theme";
+      // Default theme colors and settings.
+      const DEFAULT_THEME = {
+        face: "#f8f8f6",
+        wedge: "#d94b4b",
+        widgetBg: "#ffffff",
+        transparentBg: true,
+      };
+
+      // Settings for each timer mode.
+      const MODES = {
+        60: { maxMinutes: 60, incrementMinutes: 5 },
+        30: { maxMinutes: 30, incrementMinutes: 5 },
+        10: { maxMinutes: 10, incrementMinutes: 1 },
+      };
+
+      // Shortcut to the root style so CSS variables can be updated with JavaScript.
+      const rootStyle = document.documentElement.style;
+      // Get the SVG element where the timer is drawn.
+      const svg = document.getElementById("timerSvg");
+      // Get the main widget container.
+      const widgetCard = document.getElementById("widgetCard");
+      // Get the digital time display.
+      const timeDisplay = document.getElementById("timeDisplay");
+      // Get the start / pause button.
+      const toggleButton = document.getElementById("toggleButton");
+      // Get the minus button.
+      const minusButton = document.getElementById("minusButton");
+      // Get the plus button.
+      const plusButton = document.getElementById("plusButton");
+      // Get the confetti layer.
+      const confettiLayer = document.getElementById("confettiLayer");
+      // Get the button that opens the theme panel.
+      const themeToggle = document.getElementById("themeToggle");
+      // Get the theme panel element.
+      const themePanel = document.getElementById("themePanel");
+      // Get the clock face color input.
+      const faceColorInput = document.getElementById("faceColorInput");
+      // Get the clock wedge color input.
+      const wedgeColorInput = document.getElementById("wedgeColorInput");
+      // Get the widget background color input.
+      const bgColorInput = document.getElementById("bgColorInput");
+      // Get the transparent background checkbox.
+      const transparentBgInput = document.getElementById("transparentBgInput");
+      // Get the reset colors button.
+      const themeResetButton = document.getElementById("themeResetButton");
+      // Put all mode buttons into an array for easy looping.
+      const modeButtons = Array.from(document.querySelectorAll(".mode-button"));
+      // Re-draw the timer whenever the widget is resized.
+      const resizeObserver = new ResizeObserver(() => render());
+
+      // Store the current active timer mode.
+      let currentMode = 60;
+      // Store the remaining time in seconds.
+      let remainingSeconds = 60 * 60;
+      // Track whether the timer is currently running.
+      let isRunning = false;
+      // Track whether the user is dragging on the clock.
+      let isDragging = false;
+      // Store the countdown interval ID so it can be stopped later.
+      let intervalId = null;
+      // Store the audio context used for the finish sound.
+      let audioContext = null;
+      // Prevent the finish effects from running more than once per countdown.
+      let hasFinished = false;
+      // Store the timeout used to clear confetti later.
+      let confettiTimeoutId = null;
+
+      // Return the settings object for the currently selected mode.
+      function getModeConfig() {
+        return MODES[currentMode];
+      }
+
+      // Keep a number inside a minimum and maximum range.
+      function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
+      // Return the maximum minutes for the current mode.
+      function getMaxMinutes() {
+        return getModeConfig().maxMinutes;
+      }
+
+      // Return the minute step size for the current mode.
+      function getIncrementMinutes() {
+        return getModeConfig().incrementMinutes;
+      }
+
+      // Return the maximum number of seconds for the current mode.
+      function getMaxSeconds() {
+        return getMaxMinutes() * 60;
+      }
+
+      // Snap a minute value to the nearest allowed step for the current mode.
+      function snapMinutes(minutes) {
+        const increment = getIncrementMinutes();
+        return clamp(Math.round(minutes / increment) * increment, 0, getMaxMinutes());
+      }
+
+      // Convert an angle and radius into x and y coordinates on a circle.
+      function polarToCartesian(cx, cy, r, angleDeg) {
+        const radians = ((angleDeg - 90) * Math.PI) / 180;
+        return {
+          x: cx + r * Math.cos(radians),
+          y: cy + r * Math.sin(radians),
+        };
+      }
+
+      // Convert remaining minutes into a wedge start angle.
+      function angleFromMinutes(minutes) {
+        const maxMinutes = getMaxMinutes();
+        return (((maxMinutes - minutes) % maxMinutes) / maxMinutes) * 360;
+      }
+
+      // Convert the pointer position on screen into an angle around the clock.
+      function angleFromPointer(clientX, clientY, rect) {
+        const x = clientX - rect.left - CENTER;
+        const y = clientY - rect.top - CENTER;
+        let deg = (Math.atan2(y, x) * 180) / Math.PI + 90;
+        if (deg < 0) deg += 360;
+        return deg;
+      }
+
+      // Convert a drag angle into a snapped minute value.
+      function minutesFromAngle(angle) {
+        const normalized = ((angle % 360) + 360) % 360;
+        const maxMinutes = getMaxMinutes();
+        if (normalized === 0) return maxMinutes;
+        const rawMinutes = maxMinutes - (normalized / 360) * maxMinutes;
+        return snapMinutes(rawMinutes);
+      }
+
+      // Build the SVG path string for the colored timer wedge.
+      function describeWedge(minutes) {
+        const maxMinutes = getMaxMinutes();
+        // Show no wedge when the time is zero.
+        if (minutes <= 0) return "";
+
+        // Draw a full circle when the timer is at the maximum value.
+        if (minutes >= maxMinutes) {
+          return `M ${CENTER} ${CENTER - RADIUS} A ${RADIUS} ${RADIUS} 0 1 1 ${CENTER - 0.01} ${CENTER - RADIUS} Z`;
+        }
+
+        // Find the wedge start point on the edge of the circle.
+        const startAngle = angleFromMinutes(minutes);
+        const start = polarToCartesian(CENTER, CENTER, RADIUS, startAngle);
+        // Always end the wedge at the top of the clock.
+        const end = polarToCartesian(CENTER, CENTER, RADIUS, 0);
+        // Tell SVG whether the arc is larger than half of the circle.
+        const largeArcFlag = minutes > maxMinutes / 2 ? 1 : 0;
+
+        // Draw from the center to the edge, around the arc, and back to the center.
+        return [
+          `M ${CENTER} ${CENTER}`,
+          `L ${start.x} ${start.y}`,
+          `A ${RADIUS} ${RADIUS} 0 ${largeArcFlag} 1 ${end.x} ${end.y}`,
+          "Z",
+        ].join(" ");
+      }
+
+      // Format seconds as minutes:seconds for the digital display.
+      function formatTime(totalSeconds) {
+        const safeSeconds = Math.max(0, totalSeconds);
+        const mins = Math.floor(safeSeconds / 60);
+        const secs = safeSeconds % 60;
+        return `${mins}:${String(secs).padStart(2, "0")}`;
+      }
+
+      // Return the SVG markup for the play icon.
+      function playIcon() {
+        return `
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l10-6.86a1 1 0 0 0 0-1.72l-10-6.86A1 1 0 0 0 8 5.14z"></path>
+          </svg>
+        `;
+      }
+
+      // Return the SVG markup for the pause icon.
+      function pauseIcon() {
+        return `
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="5" width="4" height="14" rx="1"></rect>
+            <rect x="14" y="5" width="4" height="14" rx="1"></rect>
+          </svg>
+        `;
+      }
+
+      // Make sure an audio context exists and is active before sounds are played.
+      function ensureAudioContext() {
+        if (!audioContext) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) audioContext = new AudioContextClass();
+        }
+        if (audioContext && audioContext.state === "suspended") {
+          audioContext.resume().catch(() => {});
+        }
+      }
+
+      // Play a short three-note sound when the timer reaches zero.
+      function playTimeUpSound() {
+        ensureAudioContext();
+        if (!audioContext) return;
+
+        const now = audioContext.currentTime;
+
+        // Play three notes one after another.
+        [880, 1174.66, 1567.98].forEach((frequency, index) => {
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          const start = now + index * 0.16;
+          const end = start + 0.22;
+
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(frequency, start);
+          gain.gain.setValueAtTime(0.0001, start);
+          gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+          oscillator.connect(gain);
+          gain.connect(audioContext.destination);
+          oscillator.start(start);
+          oscillator.stop(end);
+        });
+      }
+
+      // Remove all confetti and cancel any pending confetti cleanup timer.
+      function clearConfetti() {
+        confettiLayer.innerHTML = "";
+        if (confettiTimeoutId !== null) {
+          clearTimeout(confettiTimeoutId);
+          confettiTimeoutId = null;
+        }
+      }
+
+      // Create lots of confetti pieces and make them fall.
+      function launchConfetti() {
+        clearConfetti();
+        const colors = ["#d94b4b", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899"];
+        const pieceCount = 420;
+        const containerHeight = confettiLayer.clientHeight || 160;
+        const containerWidth = confettiLayer.clientWidth || 320;
+
+        // Create each confetti piece one by one.
+        for (let i = 0; i < pieceCount; i += 1) {
+          const piece = document.createElement("span");
+          piece.className = "confetti-piece";
+          piece.style.left = `${Math.random() * 100}%`;
+          piece.style.top = `${-22 - Math.random() * 18}%`;
+          piece.style.background = colors[i % colors.length];
+          piece.style.setProperty("--drift-x", `${(Math.random() - 0.5) * (containerWidth * 0.25)}px`);
+          piece.style.setProperty("--rotate", `${(Math.random() * 720 - 360).toFixed(0)}deg`);
+          piece.style.setProperty("--fall-distance", `${containerHeight + 110 + Math.random() * 90}px`);
+          piece.style.animationDuration = `${(4.8 + Math.random() * 2.2).toFixed(2)}s`;
+          piece.style.animationDelay = `-${(Math.random() * 3.5).toFixed(2)}s`;
+          confettiLayer.appendChild(piece);
+        }
+
+        // Remove the confetti after the animation has had time to finish.
+        confettiTimeoutId = window.setTimeout(() => clearConfetti(), 7600);
+      }
+
+      // Run all finish effects together.
+      function celebrateTimeUp() {
+        playTimeUpSound();
+        launchConfetti();
+      }
+
+      // Stop the countdown interval if one is running.
+      function stopInterval() {
+        if (intervalId !== null) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      }
+
+      // Start the once-per-second countdown.
+      function startInterval() {
+        stopInterval();
+
+        intervalId = setInterval(() => {
+          // If time is already zero, stop and celebrate once.
+          if (remainingSeconds <= 0) {
+            remainingSeconds = 0;
+            isRunning = false;
+            stopInterval();
+            if (!hasFinished) {
+              hasFinished = true;
+              celebrateTimeUp();
+            }
+            render();
+            return;
+          }
+
+          // Remove one second each tick.
+          remainingSeconds -= 1;
+
+          // If the timer just reached zero, stop and celebrate once.
+          if (remainingSeconds <= 0) {
+            remainingSeconds = 0;
+            isRunning = false;
+            stopInterval();
+            if (!hasFinished) {
+              hasFinished = true;
+              celebrateTimeUp();
+            }
+          }
+
+          // Re-draw the timer after each second.
+          render();
+        }, 1000);
+      }
+
+      // Turn the timer running state on or off.
+      function setRunning(next) {
+        ensureAudioContext();
+        isRunning = next;
+
+        // Reset the finish flag when a new countdown starts.
+        if (next && remainingSeconds > 0) {
+          hasFinished = false;
+        }
+
+        // Start or stop the interval based on the new state.
+        if (isRunning && remainingSeconds > 0) {
+          startInterval();
+        } else {
+          stopInterval();
+        }
+
+        // Update the user interface.
+        render();
+      }
+
+      // Switch to a different timer mode and reset the timer to that mode's full length.
+      function setMode(nextMode) {
+        currentMode = nextMode;
+        hasFinished = false;
+        clearConfetti();
+        setRunning(false);
+        remainingSeconds = getMaxSeconds();
+        render();
+      }
+
+      // Add or subtract time using the current mode's step size.
+      function adjustMinutes(delta) {
+        hasFinished = false;
+        clearConfetti();
+        setRunning(false);
+        const nextMinutes = snapMinutes(Math.round(remainingSeconds / 60) + delta);
+        remainingSeconds = nextMinutes * 60;
+        render();
+      }
+
+      // Update the timer by converting the pointer position into minutes.
+      function updateFromPointer(clientX, clientY) {
+        hasFinished = false;
+        clearConfetti();
+        const rect = svg.getBoundingClientRect();
+        const angle = angleFromPointer(clientX, clientY, rect);
+        const snappedMinutes = minutesFromAngle(angle);
+        remainingSeconds = snappedMinutes * 60;
+        render();
+      }
+
+      // Build the list of minute values used for labels around the clock.
+      function getTickValues() {
+        const maxMinutes = getMaxMinutes();
+        const increment = getIncrementMinutes();
+        const values = [];
+
+        // Add each label value step by step.
+        for (let minuteValue = 0; minuteValue < maxMinutes; minuteValue += increment) {
+          values.push(minuteValue);
+        }
+
+        return values;
+      }
+
+      // Read the current theme colors from the CSS variables.
+      function getThemeColors() {
+        const styles = getComputedStyle(document.documentElement);
+        return {
+          face: styles.getPropertyValue("--face").trim(),
+          wedge: styles.getPropertyValue("--wedge").trim(),
+          text: styles.getPropertyValue("--text").trim(),
+          tick: styles.getPropertyValue("--tick").trim(),
+        };
+      }
+
+      // Apply a new theme to the widget and update the input controls.
+      function applyTheme(theme) {
+        rootStyle.setProperty("--face", theme.face);
+        rootStyle.setProperty("--wedge", theme.wedge);
+        rootStyle.setProperty("--widget-bg", theme.transparentBg ? "transparent" : theme.widgetBg);
+
+        faceColorInput.value = theme.face;
+        wedgeColorInput.value = theme.wedge;
+        bgColorInput.value = theme.widgetBg;
+        transparentBgInput.checked = theme.transparentBg;
+
+        saveTheme(theme);
+        render();
+      }
+
+      // Save the current theme to browser storage.
+      function saveTheme(theme) {
+        try {
+          localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
+        } catch (error) {
+          // Ignore storage errors so the widget still works inside embeds.
+        }
+      }
+
+      // Load a saved theme from browser storage, or use defaults if nothing is saved.
+      function loadTheme() {
+        try {
+          const savedTheme = JSON.parse(localStorage.getItem(THEME_STORAGE_KEY));
+          if (savedTheme && typeof savedTheme === "object") {
+            return {
+              face: savedTheme.face || DEFAULT_THEME.face,
+              wedge: savedTheme.wedge || DEFAULT_THEME.wedge,
+              widgetBg: savedTheme.widgetBg || DEFAULT_THEME.widgetBg,
+              transparentBg: Boolean(savedTheme.transparentBg),
+            };
+          }
+        } catch (error) {
+          // Ignore storage errors so the widget still works inside embeds.
+        }
+        return { ...DEFAULT_THEME };
+      }
+
+      // Read the current theme settings from the panel inputs.
+      function readThemeFromInputs() {
+        return {
+          face: faceColorInput.value,
+          wedge: wedgeColorInput.value,
+          widgetBg: bgColorInput.value,
+          transparentBg: transparentBgInput.checked,
+        };
+      }
+
+      // Draw or re-draw the full timer user interface.
+      function render() {
+        const svgRect = svg.getBoundingClientRect();
+        const scale = svgRect.width ? svgRect.width / SIZE : 1;
+        const majorTickWidth = (2.5 / Math.max(scale, 0.001)).toFixed(3);
+        const labelFontSize = (11 / Math.max(scale, 0.001)).toFixed(3);
+        const remainingMinutes = remainingSeconds / 60;
+        const maxMinutes = getMaxMinutes();
+        const wedgePath = describeWedge(remainingMinutes);
+        const colors = getThemeColors();
+
+        // Build all tick marks and number labels around the clock.
+        const ticksMarkup = getTickValues().map((minuteValue) => {
+          const angle = (minuteValue / maxMinutes) * 360;
+          const outer = polarToCartesian(CENTER, CENTER, RADIUS + 26, angle);
+          const inner = polarToCartesian(CENTER, CENTER, RADIUS + 8, angle);
+          const labelPoint = polarToCartesian(CENTER, CENTER, RADIUS + 40, angle);
+          const labelValue = minuteValue === 0 ? "0" : String(maxMinutes - minuteValue);
+
+          return `
+            <g>
+              <line
+                x1="${inner.x}"
+                y1="${inner.y}"
+                x2="${outer.x}"
+                y2="${outer.y}"
+                stroke="${colors.tick}"
+                stroke-width="${majorTickWidth}"
+                stroke-linecap="round"
+                opacity="0.9"
+              ></line>
+              <text
+                x="${labelPoint.x}"
+                y="${labelPoint.y}"
+                text-anchor="middle"
+                dominant-baseline="central"
+                font-size="${labelFontSize}"
+                font-weight="500"
+                fill="${colors.text}"
+              >${labelValue}</text>
+            </g>
+          `;
+        }).join("");
+
+        // Replace the SVG content with the newest clock drawing.
+        svg.innerHTML = `
+          ${ticksMarkup}
+          <circle cx="${CENTER}" cy="${CENTER}" r="${RADIUS}" fill="${colors.face}"></circle>
+          ${wedgePath ? `<path d="${wedgePath}" fill="${colors.wedge}"></path>` : ""}
+        `;
+
+        // Update the digital time display.
+        timeDisplay.textContent = formatTime(remainingSeconds);
+        // Show the play or pause icon based on the current timer state.
+        toggleButton.innerHTML = isRunning ? pauseIcon() : playIcon();
+        // Disable the center button when there is no time left.
+        toggleButton.disabled = remainingSeconds <= 0;
+        // Disable the minus button while running or when time is already zero.
+        minusButton.disabled = isRunning || remainingSeconds <= 0;
+        // Disable the plus button while running or when time is already at the maximum.
+        plusButton.disabled = isRunning || remainingSeconds >= getMaxSeconds();
+        // Keep the screen reader label correct.
+        toggleButton.setAttribute("aria-label", isRunning ? "Pause timer" : "Start timer");
+        // Change the SVG cursor while dragging.
+        svg.classList.toggle("dragging", isDragging);
+
+        // Highlight the currently active mode button.
+        modeButtons.forEach((button) => {
+          const isActive = Number(button.dataset.mode) === currentMode;
+          button.classList.toggle("active", isActive);
+          button.setAttribute("aria-pressed", String(isActive));
+        });
+      }
+
+      // Start dragging when the user presses down on the clock.
+      svg.addEventListener("pointerdown", (event) => {
+        isDragging = true;
+        setRunning(false);
+        svg.setPointerCapture(event.pointerId);
+        updateFromPointer(event.clientX, event.clientY);
+      });
+
+      // Keep updating the timer while the user drags around the clock.
+      svg.addEventListener("pointermove", (event) => {
+        if (!isDragging) return;
+        updateFromPointer(event.clientX, event.clientY);
+      });
+
+      // Stop dragging when the user releases the pointer.
+      svg.addEventListener("pointerup", (event) => {
+        isDragging = false;
+        if (svg.hasPointerCapture(event.pointerId)) {
+          svg.releasePointerCapture(event.pointerId);
+        }
+        render();
+      });
+
+      // Also stop dragging if the pointer action is cancelled.
+      svg.addEventListener("pointercancel", (event) => {
+        isDragging = false;
+        if (svg.hasPointerCapture(event.pointerId)) {
+          svg.releasePointerCapture(event.pointerId);
+        }
+        render();
+      });
+
+      // Start or pause the timer when the center button is clicked.
+      toggleButton.addEventListener("click", () => {
+        ensureAudioContext();
+        if (remainingSeconds <= 0) return;
+        setRunning(!isRunning);
+      });
+
+      // Subtract one time step when the minus button is clicked.
+      minusButton.addEventListener("click", () => {
+        adjustMinutes(-getIncrementMinutes());
+      });
+
+      // Add one time step when the plus button is clicked.
+      plusButton.addEventListener("click", () => {
+        adjustMinutes(getIncrementMinutes());
+      });
+
+      // Change the timer mode when a mode button is clicked.
+      modeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const nextMode = Number(button.dataset.mode);
+          if (nextMode !== currentMode) {
+            setMode(nextMode);
+          }
+        });
+      });
+
+      // Open or close the color settings panel when its button is clicked.
+      themeToggle.addEventListener("click", () => {
+        const isOpen = themePanel.classList.toggle("open");
+        themeToggle.setAttribute("aria-expanded", String(isOpen));
+      });
+
+      // Apply theme changes immediately when the user changes any theme input.
+      faceColorInput.addEventListener("input", () => applyTheme(readThemeFromInputs()));
+      wedgeColorInput.addEventListener("input", () => applyTheme(readThemeFromInputs()));
+      bgColorInput.addEventListener("input", () => applyTheme(readThemeFromInputs()));
+      transparentBgInput.addEventListener("change", () => applyTheme(readThemeFromInputs()));
+      // Restore default theme settings when the reset button is clicked.
+      themeResetButton.addEventListener("click", () => applyTheme({ ...DEFAULT_THEME }));
+
+      // Close the theme panel when the user clicks outside of it.
+      document.addEventListener("pointerdown", (event) => {
+        if (!themePanel.classList.contains("open")) return;
+        if (themePanel.contains(event.target) || themeToggle.contains(event.target)) return;
+        themePanel.classList.remove("open");
+        themeToggle.setAttribute("aria-expanded", "false");
+      });
+
+      // Unlock audio after the first keyboard interaction.
+      window.addEventListener("keydown", () => ensureAudioContext(), { once: true });
+      // Unlock audio after the first pointer interaction.
+      window.addEventListener("pointerdown", () => ensureAudioContext(), { once: true });
+      // Watch for size changes so the timer can be re-drawn correctly.
+      resizeObserver.observe(widgetCard);
+      // Load and apply the saved theme when the page starts.
+      applyTheme(loadTheme());
+      // Draw the initial user interface.
+      render();
+    </script>
+  </body>
+</html>
