@@ -405,6 +405,11 @@
       const themeToggle = document.getElementById("themeToggle");
       // Get the theme panel element.
       const themePanel = document.getElementById("themePanel");
+      // Make the digital time open and close the theme panel when clicked.
+      timeDisplay.addEventListener("click", () => {
+      const isOpen = themePanel.classList.toggle("open");
+      themeToggle.setAttribute("aria-expanded", String(isOpen));
+      });
       // Get the clock face color input.
       const faceColorInput = document.getElementById("faceColorInput");
       // Get the clock wedge color input.
