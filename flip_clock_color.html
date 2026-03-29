@@ -1,0 +1,559 @@
+<!DOCTYPE html> <!-- Tells the browser this document uses HTML5 -->
+<html lang="fi"> <!-- Starts the HTML document and says the page language is Finnish -->
+<head> <!-- Starts the page settings section -->
+  <meta charset="UTF-8" /> <!-- Lets the page show special characters correctly -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" /> <!-- Makes the widget scale properly on different screen sizes -->
+  <title>Notion Flip Clock Widget</title> <!-- Sets the browser tab title -->
+
+  <style> /* Starts the CSS styling section */
+    :root { /* Stores reusable design variables for the whole widget */
+      --bg: transparent; /* Stores the widget background color */
+      --panel: #fcbfa7; /* Stores the flip card background color */
+      --text: #002c23; /* Stores the main clock number color */
+      --meta: #002c23; /* Stores the date and weekday text color */
+      --shadow: rgba(0, 0, 0, 0.24); /* Stores the card shadow color */
+      --gap: clamp(6px, 2.2vw, 10px); /* Stores the gap between the two cards */
+      --pad: clamp(6px, 2.5vw, 16px); /* Stores the outer padding around the widget */
+      --radius: clamp(12px, 4vw, 18px); /* Stores the card corner roundness */
+      --meta-h: clamp(22px, 8%, 30px); /* Stores the height of the bottom label area */
+      --digit-size: clamp(86px, 33vw, 128px); /* Stores the size of the clock digits */
+      --pair-gap: 0em; /* Stores the gap between the two digit characters */
+      --digit-shift: 0.375em; /* Stores the vertical offset used to align the split digits */
+    } /* Ends the root variables */
+
+    * { /* Selects every element */
+      box-sizing: border-box; /* Makes width and height include padding and borders */
+    } /* Ends the universal selector */
+
+    html, /* Selects the html element */
+    body { /* Selects the body element */
+      margin: 0; /* Removes the browser's default page margin */
+      width: 100%; /* Makes the page use the full available width */
+      height: 100%; /* Makes the page use the full available height */
+      background: var(--bg) !important; /* Uses the widget background color variable */
+      font-family: Arial, Helvetica, sans-serif; /* Sets the default page font */
+      display: grid; /* Uses grid layout */
+      place-items: center; /* Centers the widget horizontally and vertically */
+    } /* Ends html and body styles */
+
+    .widget { /* Styles the main widget wrapper */
+      position: relative; /* Lets inner absolute-positioned elements be placed relative to this wrapper */
+      width: 100%; /* Makes the wrapper fill the available width */
+      height: 100%; /* Makes the wrapper fill the available height */
+      display: flex; /* Uses flex layout inside the wrapper */
+      align-items: center; /* Centers inner content vertically */
+      justify-content: center; /* Centers inner content horizontally */
+      padding: var(--pad); /* Adds outer space around the widget */
+      background: var(--bg) !important; /* Uses the widget background color variable */
+    } /* Ends widget styles */
+
+    .clock { /* Styles the wrapper that holds the two flip cards */
+      position: absolute; /* Places the clock relative to the widget */
+      left: 50%; /* Moves the clock anchor point to the horizontal center */
+      top: 50%; /* Moves the clock anchor point to the vertical center */
+      transform: translate(-50%, -50%); /* Shifts the clock back so it is perfectly centered */
+      display: flex; /* Places the two cards side by side */
+      align-items: center; /* Aligns the cards vertically */
+      justify-content: center; /* Centers the cards horizontally */
+      gap: var(--gap); /* Adds space between the two cards */
+      width: 100%; /* Makes the clock use the full available width */
+      max-width: 360px; /* Limits how wide the clock can become */
+      height: auto; /* Lets the height adjust automatically */
+      max-height: 260px; /* Limits how tall the clock can become */
+      transition: opacity 0.18s ease, visibility 0.18s ease; /* Smoothly animates opacity and visibility changes */
+    } /* Ends clock styles */
+
+    .card { /* Styles each flip card */
+      position: relative; /* Lets inner absolute-positioned parts use this card as their anchor */
+      flex: 1 1 0; /* Makes both cards share the available width evenly */
+      width: min(42vw, 160px); /* Sets the card width responsively */
+      max-width: 160px; /* Stops the card from getting too wide */
+      min-width: 0; /* Lets the card shrink properly inside flex layout */
+      aspect-ratio: 2 / 3; /* Keeps the card proportions consistent */
+      border-radius: var(--radius); /* Rounds the card corners */
+      overflow: hidden; /* Hides any content that goes outside the rounded corners */
+      background: var(--panel); /* Uses the selected card color */
+      box-shadow: 0 14px 30px var(--shadow); /* Adds shadow under the card */
+    } /* Ends card styles */
+
+    .digit-wrap { /* Styles the area that contains the flip digits */
+      position: absolute; /* Places the digit area inside the card */
+      inset: 0 0 var(--meta-h) 0; /* Leaves space at the bottom for the date and weekday labels */
+    } /* Ends digit area styles */
+
+    .half, /* Selects each static top and bottom half */
+    .flip-top, /* Selects the animated top half */
+    .flip-bottom { /* Selects the animated bottom half */
+      position: absolute; /* Places these layers exactly inside the card */
+      left: 0; /* Aligns them to the left edge */
+      width: 100%; /* Makes them fill the card width */
+      height: 50%; /* Makes each half cover half of the card height */
+      overflow: hidden; /* Hides the part of the digit outside the half */
+      background: var(--panel); /* Uses the selected card color */
+      backface-visibility: hidden; /* Prevents the back side from showing during 3D flip animation */
+      -webkit-backface-visibility: hidden; /* Safari version of the same backface setting */
+    } /* Ends shared half styles */
+
+    .half.top, /* Selects the static top half */
+    .flip-top { /* Selects the animated top half */
+      top: 0; /* Places the top half at the top of the card */
+      transform-origin: bottom center; /* Makes the top half rotate from the bottom edge */
+    } /* Ends top half styles */
+
+    .half.bottom, /* Selects the static bottom half */
+    .flip-bottom { /* Selects the animated bottom half */
+      bottom: 0; /* Places the bottom half at the bottom of the card */
+      transform-origin: top center; /* Makes the bottom half rotate from the top edge */
+    } /* Ends bottom half styles */
+
+    .half.top { /* Selects the static top half */
+      z-index: 2; /* Places the static top half above the static bottom half */
+    } /* Ends static top z-index */
+
+    .half.bottom { /* Selects the static bottom half */
+      z-index: 1; /* Places the static bottom half below the static top half */
+    } /* Ends static bottom z-index */
+
+    .flip-top, /* Selects the animated top half */
+    .flip-bottom { /* Selects the animated bottom half */
+      display: none; /* Hides the animated halves when no flip is happening */
+      z-index: 8; /* Places the animated halves above the static halves */
+    } /* Ends animated half base styles */
+
+    .digit { /* Styles the big number text inside each half */
+      position: absolute; /* Lets the digit be positioned precisely inside the half */
+      left: 50%; /* Moves the digit anchor point to the horizontal center */
+      display: flex; /* Places the two digit characters side by side */
+      justify-content: center; /* Centers the digit characters horizontally */
+      align-items: center; /* Centers the digit characters vertically */
+      gap: var(--pair-gap); /* Uses the stored gap between the two characters */
+      width: max-content; /* Makes the element only as wide as the content needs */
+      transform: translateX(-50%); /* Shifts the digit back so it is perfectly centered */
+      white-space: nowrap; /* Stops the two characters from wrapping to a new line */
+      text-align: center; /* Centers the text inside the element */
+      font-family: "Arial Narrow", Arial, Helvetica, sans-serif; /* Sets a condensed font look for the digits */
+      font-size: var(--digit-size); /* Uses the stored digit size */
+      font-weight: 700; /* Makes the digits bold */
+      line-height: 0.76; /* Tightens the height of the text lines */
+      letter-spacing: 0; /* Removes extra space between letters */
+      font-stretch: condensed; /* Tries to make the text appear more condensed */
+      font-variant-numeric: tabular-nums; /* Makes numbers take equal width for cleaner alignment */
+      color: var(--text); /* Uses the selected digit color */
+      -webkit-font-smoothing: antialiased; /* Smooths text on WebKit browsers */
+      text-rendering: geometricPrecision; /* Improves text rendering precision */
+    } /* Ends digit styles */
+
+    .digit .char { /* Styles one single character inside the digit pair */
+      display: block; /* Makes each character behave like a block */
+      min-width: 0.48em; /* Gives each character a minimum width for stable alignment */
+      text-align: center; /* Centers each character inside its own space */
+    } /* Ends single character styles */
+
+    .half.top .digit, /* Selects the digit inside the static top half */
+    .flip-top .digit { /* Selects the digit inside the animated top half */
+      bottom: calc(var(--digit-shift) * -1); /* Moves the digit down so the split line matches nicely */
+    } /* Ends top digit positioning */
+
+    .half.bottom .digit, /* Selects the digit inside the static bottom half */
+    .flip-bottom .digit { /* Selects the digit inside the animated bottom half */
+      top: calc(var(--digit-shift) * -1); /* Moves the digit up so the split line matches nicely */
+    } /* Ends bottom digit positioning */
+
+    .hinge-line { /* Styles the center line that looks like the flip hinge */
+      position: absolute; /* Places the hinge line inside the card */
+      left: 0; /* Stretches it from the left edge */
+      right: 0; /* Stretches it to the right edge */
+      top: 50%; /* Places it in the middle vertically */
+      height: 2px; /* Makes the hinge line thin */
+      background: var(--panel); /* Uses the selected card color */
+      transform: translateY(-1px); /* Fine-tunes the vertical position by half its height */
+      z-index: 12; /* Places the hinge line above the digit halves */
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06); /* Adds a subtle highlight to the hinge */
+      pointer-events: none; /* Makes sure the hinge line does not block clicks */
+    } /* Ends hinge line styles */
+
+    .card.flipping .flip-top, /* Selects the animated top half while a card is flipping */
+    .card.flipping .flip-bottom { /* Selects the animated bottom half while a card is flipping */
+      display: block; /* Shows the animated halves during the flip */
+    } /* Ends flip visibility styles */
+
+    .card.flipping .flip-top { /* Selects the animated top half during a flip */
+      animation: flipTop 0.38s ease-in forwards; /* Plays the top-half flip animation */
+    } /* Ends top flip animation assignment */
+
+    .card.flipping .flip-bottom { /* Selects the animated bottom half during a flip */
+      transform: rotateX(90deg); /* Starts the bottom half folded away */
+      animation: flipBottom 0.38s ease-out 0.38s forwards; /* Plays the bottom-half flip animation after the top half finishes */
+    } /* Ends bottom flip animation assignment */
+
+    @keyframes flipTop { /* Starts the animation for the old top half folding down */
+      from { /* Describes the animation start state */
+        transform: rotateX(0deg); /* Starts flat and visible */
+        filter: brightness(1); /* Starts at normal brightness */
+      } /* Ends the start state */
+      to { /* Describes the animation end state */
+        transform: rotateX(-90deg); /* Folds the top half downwards */
+        filter: brightness(0.82); /* Darkens it slightly during the fold */
+      } /* Ends the end state */
+    } /* Ends the top-half animation */
+
+    @keyframes flipBottom { /* Starts the animation for the new bottom half folding up */
+      from { /* Describes the animation start state */
+        transform: rotateX(90deg); /* Starts folded away */
+        filter: brightness(0.82); /* Starts slightly darker */
+      } /* Ends the start state */
+      to { /* Describes the animation end state */
+        transform: rotateX(0deg); /* Ends flat and visible */
+        filter: brightness(1); /* Returns to normal brightness */
+      } /* Ends the end state */
+    } /* Ends the bottom-half animation */
+
+    .meta { /* Styles the bottom label area inside each card */
+      position: absolute; /* Places the label area at the bottom of the card */
+      left: 0; /* Aligns it to the left edge */
+      right: 0; /* Stretches it to the right edge */
+      bottom: 0; /* Anchors it to the bottom edge */
+      z-index: 15; /* Places it above most other card layers */
+      height: var(--meta-h); /* Uses the stored label area height */
+      display: flex; /* Uses flex layout for date and weekday */
+      align-items: end; /* Aligns the labels to the bottom */
+      justify-content: space-between; /* Places one label left and one right */
+      padding: 0 clamp(8px, 3vw, 12px) clamp(10px, 3.5vw, 14px); /* Adds responsive inner spacing */
+    } /* Ends meta area styles */
+
+    .meta-label { /* Styles shared text look for date and weekday labels */
+      font-family: Arial, Helvetica, sans-serif; /* Uses a simple sans-serif font */
+      font-size: clamp(10px, 2.6vw, 12px); /* Uses responsive label text size */
+      font-weight: 700; /* Makes the label text bold */
+      line-height: 1; /* Keeps the label height tight */
+      letter-spacing: 0.06em; /* Adds a little space between letters */
+      color: var(--meta); /* Uses the selected meta text color */
+      text-transform: uppercase; /* Makes the label text uppercase */
+      opacity: 0.9; /* Makes the label slightly transparent */
+    } /* Ends shared meta label styles */
+
+    .date-label { /* Styles the date chip on the left card */
+      display: inline-flex; /* Makes the date behave like a small flexible inline box */
+      align-items: center; /* Centers the date text vertically */
+      border-radius: 999px; /* Makes the chip fully rounded */
+      padding: 2px 6px; /* Adds inner space around the date text */
+      background: var(--text); /* Uses the selected text color as the chip background */
+      color: #fff1eb; /* Uses a light text color on the chip */
+      user-select: none; /* Prevents the date text from being highlighted accidentally */
+    } /* Ends date chip styles */
+
+    .weekday-trigger { /* Styles the weekday button that opens the color panel */
+      cursor: pointer; /* Shows a pointer cursor on hover */
+      pointer-events: auto; /* Makes sure the button can be clicked */
+      border: 0; /* Removes the default button border */
+      border-radius: 999px; /* Makes the button fully rounded */
+      padding: 2px 6px; /* Adds inner space around the weekday text */
+      font-weight: 700; /* Makes the weekday text bold */
+      background: transparent; /* Keeps the button background clear by default */
+      color: var(--meta); /* Uses the selected meta text color */
+      transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease; /* Smoothly animates visual changes */
+      user-select: none; /* Prevents accidental text selection */
+    } /* Ends weekday button styles */
+
+    .weekday-trigger:hover, /* Selects the weekday button on hover */
+    .weekday-trigger:focus-visible, /* Selects the weekday button when focused by keyboard */
+    .weekday-trigger[aria-expanded="true"] { /* Selects the weekday button while the panel is open */
+      background: rgba(0, 44, 35, 0.1); /* Adds a subtle background highlight */
+      outline: none; /* Removes the default browser outline */
+    } /* Ends weekday button active states */
+
+    .settings-popover { /* Styles the color settings panel */
+      position: absolute; /* Places the panel relative to the widget */
+      left: 50%; /* Moves the panel anchor point to the horizontal center */
+      top: 50%; /* Moves the panel anchor point to the vertical center */
+      z-index: 40; /* Places the panel above the clock */
+      width: min(220px, calc(100vw - 24px)); /* Sets a responsive panel width */
+      padding: 12px; /* Adds inner spacing inside the panel */
+      border-radius: 16px; /* Rounds the panel corners */
+      background: rgba(255, 241, 235, 0.98); /* Uses a light panel background */
+      color: #002c23; /* Uses dark text inside the panel */
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22); /* Adds shadow under the panel */
+      opacity: 0; /* Starts the panel invisible */
+      pointer-events: none; /* Prevents clicking the hidden panel */
+      transform: translate(-50%, -50%) scale(0.96); /* Centers the panel and makes it slightly smaller at start */
+      transition: opacity 0.18s ease, transform 0.18s ease; /* Smoothly animates opening and closing */
+    } /* Ends settings panel base styles */
+
+    .settings-popover.open { /* Styles the settings panel when it is visible */
+      opacity: 1; /* Makes the panel visible */
+      pointer-events: auto; /* Allows clicking inside the open panel */
+      transform: translate(-50%, -50%) scale(1); /* Returns the panel to normal size when open */
+    } /* Ends open panel styles */
+
+    .settings-title { /* Styles the settings panel heading */
+      margin: 0 0 10px; /* Removes top margin and adds bottom space */
+      font-size: 13px; /* Sets the heading text size */
+      font-weight: 700; /* Makes the heading bold */
+      line-height: 1.2; /* Sets the heading line height */
+      text-transform: uppercase; /* Makes the heading uppercase */
+      letter-spacing: 0.04em; /* Adds a little space between letters */
+    } /* Ends settings title styles */
+
+    .settings-row { /* Styles one row inside the settings panel */
+      display: grid; /* Uses grid layout for the label and color input */
+      grid-template-columns: 1fr auto; /* Makes the text use remaining space and the input use only needed space */
+      align-items: center; /* Aligns row items vertically */
+      gap: 10px; /* Adds space between the text and the input */
+      margin-bottom: 10px; /* Adds space below each row */
+      font-size: 12px; /* Sets the row text size */
+      font-weight: 700; /* Makes the row text bold */
+    } /* Ends settings row styles */
+
+    .settings-row:last-child { /* Selects only the last settings row */
+      margin-bottom: 0; /* Removes bottom space from the last row */
+    } /* Ends last row spacing rule */
+
+    .settings-color { /* Styles each color picker input */
+      width: 44px; /* Sets the color picker width */
+      height: 30px; /* Sets the color picker height */
+      padding: 0; /* Removes default inner spacing */
+      border: 0; /* Removes the default border */
+      border-radius: 999px; /* Makes the picker rounded */
+      background: transparent; /* Keeps the outer input background clear */
+      cursor: pointer; /* Shows a pointer cursor on hover */
+      overflow: hidden; /* Hides anything outside the rounded shape */
+    } /* Ends color picker styles */
+
+    .settings-color::-webkit-color-swatch-wrapper { /* Selects the WebKit wrapper around the color swatch */
+      padding: 0; /* Removes default inner spacing */
+    } /* Ends WebKit swatch wrapper styles */
+
+    .settings-color::-webkit-color-swatch { /* Selects the actual WebKit color swatch */
+      border: 0; /* Removes the default swatch border */
+      border-radius: 999px; /* Makes the swatch rounded */
+    } /* Ends WebKit swatch styles */
+
+    .settings-color::-moz-color-swatch { /* Selects the Firefox color swatch */
+      border: 0; /* Removes the default swatch border */
+      border-radius: 999px; /* Makes the swatch rounded */
+    } /* Ends Firefox swatch styles */
+
+    @media (max-aspect-ratio: 4/5) { /* Applies these rules on taller and narrower screens */
+      :root { /* Updates some variables for smaller layouts */
+        --gap: clamp(4px, 1.8vw, 8px); /* Makes the card gap a bit smaller */
+        --pad: clamp(4px, 2vw, 10px); /* Makes the outer padding a bit smaller */
+        --digit-size: clamp(72px, 31vw, 110px); /* Makes the digit size a bit smaller */
+      } /* Ends smaller-layout variables */
+
+      .card { /* Selects each card */
+        max-width: none; /* Removes the max width limit on smaller layouts */
+      } /* Ends smaller-layout card rule */
+
+      .settings-popover { /* Selects the settings panel */
+        width: min(220px, calc(100vw - 16px)); /* Makes the panel fit better on narrow screens */
+      } /* Ends smaller-layout panel rule */
+    } /* Ends the media query */
+  </style> <!-- Ends the CSS styling section -->
+</head> <!-- Ends the head section -->
+<body> <!-- Starts the visible page content -->
+  <div class="widget"> <!-- Main widget wrapper -->
+    <div class="clock" id="clock" aria-label="Paikallinen flip-kello"> <!-- Wrapper for the two flip cards -->
+      <div class="card" id="hourCard"> <!-- Left card for the hours -->
+        <div class="digit-wrap"> <!-- Area that holds the hour digit halves -->
+          <div class="half top"><div class="digit" id="hourTopStatic">00</div></div> <!-- Static top half of the hour -->
+          <div class="half bottom"><div class="digit" id="hourBottomStatic">00</div></div> <!-- Static bottom half of the hour -->
+          <div class="flip-top"><div class="digit" id="hourFlipTop">00</div></div> <!-- Animated top half used during hour flips -->
+          <div class="flip-bottom"><div class="digit" id="hourFlipBottom">00</div></div> <!-- Animated bottom half used during hour flips -->
+          <div class="hinge-line"></div> <!-- Visual line in the middle of the card -->
+        </div> <!-- Ends the hour digit area -->
+
+        <div class="meta"> <!-- Bottom label row of the hour card -->
+          <div class="meta-label date-label" id="dateLabel">28.03.</div> <!-- Date label on the left -->
+          <div></div> <!-- Empty spacer on the right -->
+        </div> <!-- Ends the hour card label row -->
+      </div> <!-- Ends the hour card -->
+
+      <div class="card" id="minuteCard"> <!-- Right card for the minutes -->
+        <div class="digit-wrap"> <!-- Area that holds the minute digit halves -->
+          <div class="half top"><div class="digit" id="minuteTopStatic">00</div></div> <!-- Static top half of the minute -->
+          <div class="half bottom"><div class="digit" id="minuteBottomStatic">00</div></div> <!-- Static bottom half of the minute -->
+          <div class="flip-top"><div class="digit" id="minuteFlipTop">00</div></div> <!-- Animated top half used during minute flips -->
+          <div class="flip-bottom"><div class="digit" id="minuteFlipBottom">00</div></div> <!-- Animated bottom half used during minute flips -->
+          <div class="hinge-line"></div> <!-- Visual line in the middle of the card -->
+        </div> <!-- Ends the minute digit area -->
+
+        <div class="meta"> <!-- Bottom label row of the minute card -->
+          <div></div> <!-- Empty spacer on the left -->
+          <button class="meta-label weekday-trigger" id="weekdayTrigger" type="button" aria-haspopup="dialog" aria-expanded="false">MAANANTAI</button> <!-- Weekday button that opens the color panel -->
+        </div> <!-- Ends the minute card label row -->
+      </div> <!-- Ends the minute card -->
+    </div> <!-- Ends the clock wrapper -->
+
+    <div class="settings-popover" id="settingsPopover" role="dialog" aria-modal="false" aria-label="Kellon värit"> <!-- Pop-up panel for color settings -->
+      <p class="settings-title">Kellon värit</p> <!-- Panel title -->
+      <label class="settings-row" for="clockColorInput"> <!-- Row for changing the card color -->
+        <span>Kellon väri</span> <!-- Text label for the card color -->
+        <input class="settings-color" id="clockColorInput" type="color" value="#fcbfa7" /> <!-- Color picker for the card color -->
+      </label> <!-- Ends the card color row -->
+      <label class="settings-row" for="fontColorInput"> <!-- Row for changing the text color -->
+        <span>Fontin väri</span> <!-- Text label for the text color -->
+        <input class="settings-color" id="fontColorInput" type="color" value="#002c23" /> <!-- Color picker for the text color -->
+      </label> <!-- Ends the text color row -->
+      <label class="settings-row" for="backgroundColorInput"> <!-- Row for changing the widget background color -->
+        <span>Taustan väri</span> <!-- Text label for the widget background color -->
+        <input class="settings-color" id="backgroundColorInput" type="color" value="#ffffff" /> <!-- Color picker for the widget background color -->
+      </label> <!-- Ends the background color row -->
+    </div> <!-- Ends the settings panel -->
+  </div> <!-- Ends the main widget wrapper -->
+
+  <script> // Starts the JavaScript section
+    const weekdays = [ // Stores Finnish weekday names
+      "sunnuntai", // Sunday
+      "maanantai", // Monday
+      "tiistai", // Tuesday
+      "keskiviikko", // Wednesday
+      "torstai", // Thursday
+      "perjantai", // Friday
+      "lauantai" // Saturday
+    ]; // Ends the weekday list
+
+    const pad = (n) => String(n).padStart(2, "0"); // Adds a leading zero to one-digit numbers
+
+    const rootStyle = document.documentElement; // Saves the root HTML element so CSS variables can be changed easily
+    const dateLabel = document.getElementById("dateLabel"); // Finds the date label element
+    const weekdayTrigger = document.getElementById("weekdayTrigger"); // Finds the weekday button element
+    const settingsPopover = document.getElementById("settingsPopover"); // Finds the settings panel element
+    const clockColorInput = document.getElementById("clockColorInput"); // Finds the clock color picker
+    const fontColorInput = document.getElementById("fontColorInput"); // Finds the font color picker
+    const backgroundColorInput = document.getElementById("backgroundColorInput"); // Finds the widget background color picker
+    let currentHour = null; // Stores the currently shown hour so animation only happens when the hour changes
+    let currentMinute = null; // Stores the currently shown minute so animation only happens when the minute changes
+
+    const savedPanelColor = localStorage.getItem("flipClockPanelColor"); // Reads the saved card color from local storage
+    const savedFontColor = localStorage.getItem("flipClockFontColor"); // Reads the saved font color from local storage
+    const savedBackgroundColor = localStorage.getItem("flipClockBackgroundColor"); // Reads the saved widget background color from local storage
+
+    function applyClockColors(panelColor, fontColor, backgroundColor) { // Applies the selected colors to the widget
+      rootStyle.style.setProperty("--panel", panelColor); // Updates the card color variable
+      rootStyle.style.setProperty("--text", fontColor); // Updates the main digit color variable
+      rootStyle.style.setProperty("--meta", fontColor); // Updates the date and weekday color variable
+      rootStyle.style.setProperty("--bg", backgroundColor); // Updates the widget background color variable
+      clockColorInput.value = panelColor; // Updates the card color picker to match the current card color
+      fontColorInput.value = fontColor; // Updates the font color picker to match the current font color
+      backgroundColorInput.value = backgroundColor; // Updates the background color picker to match the current widget background color
+      localStorage.setItem("flipClockPanelColor", panelColor); // Saves the card color in local storage
+      localStorage.setItem("flipClockFontColor", fontColor); // Saves the font color in local storage
+      localStorage.setItem("flipClockBackgroundColor", backgroundColor); // Saves the widget background color in local storage
+    } // Ends the color applying function
+
+    if (savedPanelColor && savedFontColor && savedBackgroundColor) { // Checks if all three saved colors exist
+      applyClockColors(savedPanelColor, savedFontColor, savedBackgroundColor); // Applies the saved colors
+    } // Ends the saved-color check
+
+    function formatDigits(value) { // Turns a two-character string like 07 into two separate span elements
+      return value // Starts with the original value
+        .split("") // Splits the string into single characters
+        .map((char) => `<span class="char">${char}</span>`) // Wraps each character in a span
+        .join(""); // Joins the spans back into one HTML string
+    } // Ends the digit formatting function
+
+    function setStatic(prefix, value) { // Puts the same value into the static top and bottom halves of one card
+      const html = formatDigits(value); // Builds the digit HTML
+      document.getElementById(`${prefix}TopStatic`).innerHTML = html; // Updates the static top half
+      document.getElementById(`${prefix}BottomStatic`).innerHTML = html; // Updates the static bottom half
+    } // Ends the static digit update function
+
+    function animate(cardId, prefix, oldValue, newValue) { // Animates one card from the old value to the new value
+      if (oldValue === newValue) return; // Stops immediately if the value did not change
+
+      const card = document.getElementById(cardId); // Finds the card that should animate
+      document.getElementById(`${prefix}FlipTop`).innerHTML = formatDigits(oldValue); // Puts the old value into the animated top half
+      document.getElementById(`${prefix}FlipBottom`).innerHTML = formatDigits(newValue); // Puts the new value into the animated bottom half
+
+      card.classList.remove("flipping"); // Removes the flipping class in case it was already there
+      void card.offsetWidth; // Forces a reflow so the animation can restart cleanly
+      card.classList.add("flipping"); // Adds the flipping class to start the animation
+
+      setTimeout(() => setStatic(prefix, newValue), 380); // Replaces the static value halfway through the animation
+      setTimeout(() => card.classList.remove("flipping"), 760); // Removes the flipping class when the animation is fully finished
+    } // Ends the flip animation function
+
+    function openSettings() { // Opens the color settings panel
+      settingsPopover.classList.add("open"); // Shows the panel
+      weekdayTrigger.setAttribute("aria-expanded", "true"); // Updates accessibility state to say the panel is open
+    } // Ends the panel opening function
+
+    function closeSettings() { // Closes the color settings panel
+      settingsPopover.classList.remove("open"); // Hides the panel
+      weekdayTrigger.setAttribute("aria-expanded", "false"); // Updates accessibility state to say the panel is closed
+    } // Ends the panel closing function
+
+    function toggleSettings() { // Opens or closes the panel depending on its current state
+      if (settingsPopover.classList.contains("open")) { // Checks if the panel is currently open
+        closeSettings(); // Closes it if it is open
+      } else { // Runs when the panel is closed
+        openSettings(); // Opens it
+      } // Ends the open-or-close decision
+    } // Ends the panel toggle function
+
+    function update() { // Updates the clock time and the bottom labels
+      const now = new Date(); // Gets the current date and time
+      const nextHour = pad(now.getHours()); // Gets the current hour as a two-digit string
+      const nextMinute = pad(now.getMinutes()); // Gets the current minute as a two-digit string
+
+      if (currentHour === null) { // Checks if this is the first time the clock is being drawn
+        currentHour = nextHour; // Saves the current hour
+        setStatic("hour", nextHour); // Draws the hour without animation
+      } else if (currentHour !== nextHour) { // Checks if the hour has changed
+        animate("hourCard", "hour", currentHour, nextHour); // Animates the hour flip
+        currentHour = nextHour; // Saves the new current hour
+      } // Ends the hour update logic
+
+      if (currentMinute === null) { // Checks if this is the first time the minute is being drawn
+        currentMinute = nextMinute; // Saves the current minute
+        setStatic("minute", nextMinute); // Draws the minute without animation
+      } else if (currentMinute !== nextMinute) { // Checks if the minute has changed
+        animate("minuteCard", "minute", currentMinute, nextMinute); // Animates the minute flip
+        currentMinute = nextMinute; // Saves the new current minute
+      } // Ends the minute update logic
+
+      weekdayTrigger.textContent = weekdays[now.getDay()].toUpperCase(); // Updates the weekday button text
+      dateLabel.textContent = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.`; // Updates the date label text
+    } // Ends the main update function
+
+    weekdayTrigger.addEventListener("click", toggleSettings); // Opens or closes the panel when the weekday button is clicked
+
+    clockColorInput.addEventListener("input", (event) => { // Runs when the user picks a new card color
+      applyClockColors(event.target.value, fontColorInput.value, backgroundColorInput.value); // Applies the new card color and keeps the current other colors
+    }); // Ends the card color input listener
+
+    fontColorInput.addEventListener("input", (event) => { // Runs when the user picks a new font color
+      applyClockColors(clockColorInput.value, event.target.value, backgroundColorInput.value); // Applies the new font color and keeps the current other colors
+    }); // Ends the font color input listener
+
+    backgroundColorInput.addEventListener("input", (event) => { // Runs when the user picks a new widget background color
+      applyClockColors(clockColorInput.value, fontColorInput.value, event.target.value); // Applies the new background color and keeps the current other colors
+    }); // Ends the background color input listener
+
+    document.addEventListener("keydown", (event) => { // Watches for keyboard presses anywhere on the page
+      if (event.key === "Escape") { // Checks if the pressed key is Escape
+        closeSettings(); // Closes the panel
+      } // Ends the Escape key check
+    }); // Ends the keyboard listener
+
+    document.addEventListener("click", (event) => { // Watches for clicks anywhere on the page
+      const clickedInsideSettings = settingsPopover.contains(event.target); // Checks if the click happened inside the panel
+      const clickedSettingsButton = weekdayTrigger.contains(event.target); // Checks if the click happened on the weekday button
+
+      if (!clickedInsideSettings && !clickedSettingsButton) { // Checks if the click was outside both the panel and the button
+        closeSettings(); // Closes the panel
+      } // Ends the outside-click check
+    }); // Ends the document click listener
+
+    update(); // Draws the current time immediately when the widget loads
+
+    const now = new Date(); // Gets the current time once more for update timing
+    const delay = (60 - now.getSeconds()) * 1000 - now.getMilliseconds(); // Calculates how long until the next exact minute starts
+
+    setTimeout(() => { // Waits until the next exact minute
+      update(); // Updates the clock exactly on that minute
+      setInterval(update, 60000); // Then updates the clock every 60 seconds
+    }, delay); // Uses the calculated waiting time
+  </script> <!-- Ends the JavaScript section -->
+</body> <!-- Ends the visible page content -->
+</html> <!-- Ends the HTML document -->
